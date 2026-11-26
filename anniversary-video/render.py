@@ -123,10 +123,13 @@ VIG = (1 - 0.28 * np.clip(r - 0.55, 0, 1) ** 1.5)[..., None]
 GRAD = (1 - 0.55 * np.clip((yy / H - 0.55) / 0.45, 0, 1) ** 1.6)[..., None]
 
 # ---------- beat grid (Perfect: ~63.4 BPM) ----------
-BPM_P, BPM_PH = 0.9464, 0.156
+# defaults fit "Perfect" (63.4 BPM); override via env for other songs
+BPM_P = float(os.environ.get("BEAT_P", 0.9464)); BPM_PH = float(os.environ.get("BEAT_PH", 0.156))
+INTRO_BEATS = int(os.environ.get("INTRO_BEATS", 6))
+B_POEM = int(os.environ.get("BEATS_POEM", 5)); B_PLAIN = int(os.environ.get("BEATS_PLAIN", 4))
 def beat(k): return BPM_PH + k * BPM_P - ASTART
-SHORT_POEMS = {"WA0041", "WA0056", "WA0061"}
-beats_per = [5 if (poem and k not in SHORT_POEMS) else 4 for k, poem in SEQ]  # 8*5 + 18*4 = 112 beats
+SHORT_POEMS = set(os.environ.get("SHORT_POEMS", "WA0041,WA0056,WA0061").split(",")) - {""}
+beats_per = [B_POEM if (poem and k not in SHORT_POEMS) else B_PLAIN for k, poem in SEQ]
 TRANS = ["zoom", "slide", "fade", "heart", "wipe", "flash", "circle", "slideup", "fade", "zoom",
          "heart", "slide", "flash", "circle", "wipe", "fade", "slide", "heart", "zoom", "slideup",
          "flash", "slide", "circle", "fade", "wipe", "heart", "fade"]  # index i = transition INTO seg i+1
@@ -136,7 +139,7 @@ def ease2(t): t = min(max(t, 0), 1); return 0.5 - 0.5 * math.cos(math.pi * t)
 
 # ---------- build segments ----------
 segs = []  # dict(start, dur, kind, data, trans)
-b = 6
+b = INTRO_BEATS
 segs.append(dict(s=0.0, d=beat(b) - XF / 2, kind="intro", data=None, tr=None))
 for i, (k, poem) in enumerate(SEQ):
     print("prep", k, flush=True)
