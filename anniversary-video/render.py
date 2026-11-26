@@ -19,8 +19,8 @@ SEQ = [
     ("WA0035", None), ("WA0072", None),
     ("WA0053", "Even miles apart,\nyour voice felt like home"),
     ("WA0041", "And then\nthere was us"),
-    ("WA0044", None), ("WA0052", None),
-    ("WA0054", "You are my favourite\nplace to be"),
+    ("WA0044", None),
+    ("WA0052", "You are my favourite\nplace to be"),
     ("WA0056", "Two paths,\none direction"),
     ("WA0065", None),
     ("WA0064", "Hold my hand\nand the world gets quiet"),
@@ -130,7 +130,7 @@ B_POEM = int(os.environ.get("BEATS_POEM", 5)); B_PLAIN = int(os.environ.get("BEA
 def beat(k): return BPM_PH + k * BPM_P - ASTART
 SHORT_POEMS = set(os.environ.get("SHORT_POEMS", "WA0041,WA0056,WA0061").split(",")) - {""}
 beats_per = [B_POEM if (poem and k not in SHORT_POEMS) else B_PLAIN for k, poem in SEQ]
-TRANS = ["zoom", "slide", "fade", "heart", "wipe", "flash", "circle", "slideup", "fade", "zoom",
+TRANS = ["fade", "slide", "fade", "heart", "wipe", "flash", "circle", "slideup", "fade", "zoom",
          "heart", "slide", "flash", "circle", "wipe", "fade", "slide", "heart", "zoom", "slideup",
          "flash", "slide", "circle", "fade", "wipe", "heart", "fade"]  # index i = transition INTO seg i+1
 
@@ -280,11 +280,11 @@ for (cx, cy, rad, col) in [(0.2, 0.3, 0.35, (255, 150, 90)), (0.75, 0.6, 0.3, (2
     d2 = ((gx - cx * W / q) ** 2 + (gy - cy * H / q) ** 2) / (rad * max(W, H) / q) ** 2
     LEAK += np.exp(-d2)[..., None] * np.array(col, np.float32)
 
-def overlays(out, T, burst):
+def overlays(out, T, burst, lf=1.0):
     # drifting light leak
     dx = math.sin(T * 0.13) * W / q * 0.35; dy = math.cos(T * 0.09) * H / q * 0.25
     lk = cv2.warpAffine(LEAK, np.float32([[1, 0, dx], [0, 1, dy]]), (W // q, H // q), borderMode=cv2.BORDER_CONSTANT)
-    out += cv2.resize(lk, (W, H), interpolation=cv2.INTER_LINEAR) * (0.10 + 0.05 * math.sin(T * 0.5))
+    out += cv2.resize(lk, (W, H), interpolation=cv2.INTER_LINEAR) * (0.10 + 0.05 * math.sin(T * 0.5)) * lf
     for sp in SPARKS:
         a = max(0.0, math.sin(T * sp["f"] * 2 * math.pi / 2 + sp["ph"])) ** 4 * 0.8
         add_glow(out, sp["spr"], sp["x"], sp["y"], a * burst)
@@ -328,6 +328,7 @@ def seg_frame(sg, T, layers):
                 layers.append(("p", L, W / 2 + dx, ty + dy + (1 - ease(ta)) * 26 * S, ease(ta) * ease(fo), None, 1.0))
         return render_photo(sg["data"], lt, d)
     if sg["kind"] == "intro":
+        return opening(lt, layers)
         f = BLUR * (0.5 + 0.5 * ease(min(1, lt / 1.5)))
         fade = np.clip((d + XF - lt) / 0.7, 0, 1); cy = H * 0.45
         layers.append(("p", title, W / 2, cy, fade, ease2(np.clip((lt - 0.4) / 2.2, 0, 1)), 1.0))
@@ -351,6 +352,122 @@ def seg_frame(sg, T, layers):
 
 HEART_ICON = make_heart(int(34 * S), (255, 130, 160))
 
+# ---------- cinematic opening (inspired by the reference edits) ----------
+ANTON = f"{FONTS}/anton/package/files/anton-latin-400-normal.woff"
+GOLD = (236, 196, 120)
+def tb(k): return beat(k)
+
+# 1) photo-filled word "LOVE" on black
+def word_mask(word):
+    target = W * (0.86 if VERT else 0.62)
+    f = ImageFont.truetype(ANTON, 100); k = target / f.getlength(word)
+    f = ImageFont.truetype(ANTON, int(100 * k))
+    img = Image.new("L", (W, H), 0); d = ImageDraw.Draw(img)
+    bb = d.textbbox((0, 0), word, font=f)
+    cy = H * (0.45 if VERT else 0.47)
+    d.text((W / 2 - (bb[0] + bb[2]) / 2, cy - (bb[1] + bb[3]) / 2), word, font=f, fill=255)
+    m = np.array(img).astype(np.float32) / 255.0
+    dist = cv2.distanceTransform((m > 0.5).astype(np.uint8), cv2.DIST_L2, 5)
+    score = dist - 0.03 * np.sqrt((xx - W / 2) ** 2 + (yy - cy) ** 2)
+    py, px = np.unravel_index(np.argmax(score), score.shape)
+    return m, (float(px), float(py)), float(dist[py, px]), (bb[2] - bb[0], bb[3] - bb[1]), cy
+LOVE_M, LOVE_PT, LOVE_D, LOVE_SZ, LOVE_CY = word_mask("LOVE")
+LOVE_X0 = W / 2 - LOVE_SZ[0] / 2
+OPEN_C = build_canvas(load(files["WA0054"]))
+OPEN_DATA = (OPEN_C[0], OPEN_C[1], None, 0)
+tag = text_layer(["our love story"], SCRIPT, 92 if VERT else 80, color=(255, 236, 220))
+
+# 2) gold title with tracking-in letters
+def letter_layers(word, font, size, color):
+    f = ImageFont.truetype(font, int(size * S)); adv = [f.getlength(ch) for ch in word]
+    tot = sum(adv); x = -tot / 2; out = []
+    for ch, a in zip(word, adv):
+        out.append((text_layer([ch], font, size, color), x + a / 2)); x += a
+    return out
+ANNIV = letter_layers("ANNIVERSARY", SERIF, 112 if VERT else 120, GOLD)
+happy = text_layer(["happy"], SERIF_I, 64 if VERT else 66, color=(255, 245, 235))
+date_script = text_layer(["27 November"], SCRIPT, 96 if VERT else 96, color=GOLD)
+
+# 3) photo-grid collage
+GRID = ["WA0044", "WA0073", "WA0086", "WA0088", None, "WA0061", "WA0057", "WA0065", "WA0004"]
+GAP = int(6 * S); TW = (W - 4 * GAP) // 3; TH = (H - 4 * GAP) // 3
+GRID_T = {k: cv2.resize(build_canvas(load(files[k]))[0], (TW, TH), interpolation=cv2.INTER_AREA).astype(np.float32)
+          for k in GRID if k}
+
+def paste_rgb(frame, img, cx, cy, alpha):
+    h, w = img.shape[:2]; x0, y0 = int(cx - w / 2), int(cy - h / 2)
+    xa, ya = max(0, x0), max(0, y0); xb, yb = min(W, x0 + w), min(H, y0 + h)
+    if xb <= xa or yb <= ya or alpha <= 0: return
+    frame[ya:yb, xa:xb] = frame[ya:yb, xa:xb] * (1 - alpha) + img[ya - y0:yb - y0, xa - x0:xb - x0] * alpha
+
+def tile_center(i):
+    r, c = divmod(i, 3); return GAP + c * (TW + GAP) + TW / 2, GAP + r * (TH + GAP) + TH / 2
+
+POP_ORDER = [0, 2, 8, 6, 1, 5, 7, 3]  # corners, then edges; centre last
+
+def grid_frame(T):
+    G = np.zeros((H, W, 3), np.float32)
+    for j, i in enumerate(POP_ORDER + [4]):
+        t0 = tb(9.3 + j * 0.42) if i != 4 else tb(12.4)
+        a = np.clip((T - t0) / 0.32, 0, 1)
+        if a <= 0: continue
+        e = ease2(a); sc = 0.72 + 0.28 * e
+        if i == 4:
+            s1 = segs[1]; img = cv2.resize(render_photo(s1["data"], max(0.0, T - s1["s"]), s1["d"]), (TW, TH), interpolation=cv2.INTER_AREA)
+        else:
+            img = GRID_T[GRID[i]]
+        if sc < 0.999: img = cv2.resize(img, (max(1, int(TW * sc)), max(1, int(TH * sc))), interpolation=cv2.INTER_LINEAR)
+        cx, cy = tile_center(i); paste_rgb(G, img, cx, cy, e)
+    # zoom into the centre tile so it becomes the first story photo
+    zt = ease2(np.clip((T - tb(13)) / (tb(14) - XF / 2 - tb(13)), 0, 1))
+    if zt > 0:
+        zmax = max(W / TW, H / TH) * 1.002; z = 1 + (zmax - 1) * zt
+        G = scale_img(G, z)
+    return G
+
+def opening(T, layers):
+    t_wipe0, t_wipe1, t_zoom0, t_zoom1, t_leak = tb(0), tb(1.6), tb(4), tb(5.6), tb(9)
+    photo = render_photo(OPEN_DATA, T + 1.0, 14.0)
+    if T < t_zoom1:  # photo seen through the letters
+        m = LOVE_M
+        if T < t_wipe1:
+            rv = ease2(np.clip((T - t_wipe0) / (t_wipe1 - t_wipe0), 0, 1)); fe = 0.18 * LOVE_SZ[0]
+            ramp = np.clip((LOVE_X0 + rv * (LOVE_SZ[0] + fe) - np.arange(W, dtype=np.float32)) / fe, 0, 1)
+            m = m * ramp[None, :]
+        if T > t_zoom0:
+            e = np.clip((T - t_zoom0) / (t_zoom1 - t_zoom0), 0, 1) ** 2.4
+            s = math.exp(math.log(max(W, H) * 1.6 / max(LOVE_D, 1)) * e)
+            px, py = LOVE_PT
+            m = cv2.warpAffine(m, np.float32([[s, 0, px - s * px], [0, s, py - s * py]]), (W, H), flags=cv2.INTER_LINEAR)
+        out = photo * m[..., None]
+        ta = ease(np.clip((T - tb(1.6)) / 0.7, 0, 1)) * (1 - ease(np.clip((T - t_zoom0) / 0.4, 0, 1)))
+        layers.append(("p", tag, W / 2, LOVE_CY + LOVE_SZ[1] / 2 + 70 * S, ta, None, 1.0))
+        return out
+    # title over the full photo
+    dk = ease(np.clip((T - t_zoom1) / 0.6, 0, 1))
+    out = photo * (1 - 0.45 * dk)
+    lt = T - t_zoom1; cy = H * 0.5
+    fo = 1 - ease(np.clip((T - (t_leak - 0.25)) / 0.35, 0, 1))
+    for k, (L, dx) in enumerate(ANNIV):
+        a = ease(np.clip((lt - 0.15 - k * 0.04) / 0.5, 0, 1))
+        spread = 1 + 1.4 * (1 - ease2(np.clip((lt - 0.1) / 1.4, 0, 1)))
+        layers.append(("p", L, W / 2 + dx * spread, cy, a * fo, None, 1.0))
+    layers.append(("p", happy, W / 2, cy - 105 * S, ease(np.clip((lt - 0.9) / 0.5, 0, 1)) * fo, None, 1.0))
+    layers.append(("p", date_script, W / 2, cy + 100 * S, fo, ease2(np.clip((lt - 1.2) / 1.2, 0, 1)), 1.0))
+    # light-leak burn into the photo grid
+    if T > t_leak - 0.35:
+        g = np.clip((T - (t_leak - 0.35)) / 0.8, 0, 1)
+        G = grid_frame(T)
+        e = ease2(np.clip((T - (t_leak - 0.1)) / 0.3, 0, 1))
+        out = out * (1 - e) + G * e
+        burn = math.sin(math.pi * g) ** 1.5
+        if burn > 0.01:
+            dx = (g - 0.5) * W / q * 1.2
+            lk = cv2.warpAffine(LEAK, np.float32([[1.6, 0, dx - 0.3 * W / q], [0, 1.6, -0.3 * H / q]]), (W // q, H // q))
+            out = out + cv2.resize(lk, (W, H)) * 0.9 * burn + 20 * burn
+    return out
+
+
 def frame_at(T):
     act = [sg for sg in segs if sg["s"] - 1e-6 <= T < sg["s"] + sg["d"] + XF]
     layers = []
@@ -362,9 +479,9 @@ def frame_at(T):
         out = mix(fa, fb, (T - B_["s"]) / XF, B_["tr"])
     out = np.ascontiguousarray(out, dtype=np.float32)
     s0, sl = segs[0], segs[-1]
-    burst = max(np.clip((s0["d"] + XF - T) / 1.0, 0, 1) * ease(np.clip(T / 1.2, 0, 1)),
+    burst = max(0.0,
                 ease(np.clip((T - sl["s"]) / 1.5, 0, 1)) * (1 - ease(np.clip((T - (TOTAL - 1.5)) / 1.5, 0, 1))))
-    overlays(out, T, burst)
+    overlays(out, T, burst, ease(np.clip((T - segs[1]["s"]) / 1.5, 0, 1)))
     for (_, L, x, y, al, rev, sc) in layers: paste(out, L, x, y, al, rev, sc)
     return out.clip(0, 255).astype(np.uint8)
 
