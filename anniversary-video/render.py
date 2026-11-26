@@ -284,12 +284,12 @@ def overlays(out, T, burst):
     out += cv2.resize(lk, (W, H), interpolation=cv2.INTER_LINEAR) * (0.10 + 0.05 * math.sin(T * 0.5))
     for sp in SPARKS:
         a = max(0.0, math.sin(T * sp["f"] * 2 * math.pi / 2 + sp["ph"])) ** 4 * 0.8
-        add_glow(out, sp["spr"], sp["x"], sp["y"], a)
+        add_glow(out, sp["spr"], sp["x"], sp["y"], a * burst)
     for h in HEARTS:
         y = H + 60 * S - ((T * h["spd"] + h["ph"]) % (H + 120 * S))
         x = h["x"] + h["amp"] * math.sin(T * h["f"] * 2 * math.pi + h["ph"])
         fadeedge = min(1, (H + 60 * S - y) / (200 * S), y / (300 * S))
-        paste(out, h["spr"], x, y, h["a"] * max(0, fadeedge))
+        paste(out, h["spr"], x, y, h["a"] * max(0, fadeedge) * burst)
     if burst > 0:
         for h in BURST:
             y = H + 80 * S - ((T * h["spd"] + h["ph"] * H) % (H + 160 * S))
