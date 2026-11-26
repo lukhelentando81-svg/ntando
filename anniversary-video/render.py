@@ -63,12 +63,15 @@ def face_center(a):
 M = 1.12  # canvas margin for Ken Burns
 CW, CH = int(W * M), int(H * M)
 
-def build_canvas(a):
+SIDE = set()  # segment indices whose poem sits beside the photo (landscape)
+def build_canvas(a, cover=False, side=False):
     """Return canvas (CH,CW,3) with photo framed, and focus point in canvas coords."""
     h, w = a.shape[:2]; fx, fy = face_center(a)
     ra, rt = w / h, CW / CH
     loss = 1 - min(ra, rt) / max(ra, rt)
-    if loss < 0.30:  # cover-crop, centred on faces
+    global LAST_FIT
+    LAST_FIT = False
+    if cover or loss < 0.30:  # cover-crop, centred on faces
         if ra > rt:
             nw = int(h * rt); x0 = int(np.clip(fx * w - nw / 2, 0, w - nw)); a2 = a[:, x0:x0 + nw]
             fx = (fx * w - x0) / nw
@@ -84,7 +87,8 @@ def build_canvas(a):
     bg = cv2.GaussianBlur(bg, (0, 0), 40 * S).astype(np.float32) * 0.55
     k = min(CW * 0.92 / w, CH * 0.86 / h) if not VERT else min(CW * 0.94 / w, CH * 0.9 / h)
     pw, ph = int(w * k), int(h * k); p = cv2.resize(a, (pw, ph), interpolation=cv2.INTER_AREA)
-    px, py = (CW - pw) // 2, (CH - ph) // 2
+    LAST_FIT = True
+    px, py = int(CW * (0.37 if side else 0.5) - pw / 2), (CH - ph) // 2
     if VERT: py = int(CH * 0.47 - ph / 2); py = max(int(CH * 0.06), py)
     # soft shadow
     sh = np.zeros((CH, CW), np.float32); sh[py + 12:py + ph + 12, px + 6:px + pw + 6] = 1
@@ -180,7 +184,8 @@ segs = []  # dict(start, dur, kind, data, trans)
 segs.append(dict(s=0.0, d=STARTS[0], kind="intro", data=None, tr=None))
 for i, (k, poem) in enumerate(SEQ):
     print("prep", k, flush=True)
-    c, focus = build_canvas(load(files[k]))
+    c, focus = build_canvas(load(files[k]), side=(not VERT and poem is not None))
+    if LAST_FIT and not VERT and poem: SIDE.add(i)
     segs.append(dict(s=STARTS[i], d=STARTS[i + 1] - STARTS[i], kind="photo", data=(c, focus, poem, i), tr=TRANS[i]))
 segs.append(dict(s=STARTS[-1], d=TOTAL - STARTS[-1], kind="outro", data=None, tr=TRANS[len(SEQ)]))
 OUT_T = (dict(a=(1.5, 1.6), b=(3.1, 1.0), c=3.7, d=4.3, f=1.4) if LYRIC else
@@ -352,18 +357,19 @@ def render_photo(data, lt, d):
     x = cx0 + (tx - cx0) * 0.6; y = cy0 + (ty - cy0) * 0.6
     A = np.float32([[W / ww, 0, -x * W / ww], [0, H / wh, -y * H / wh]])
     f = cv2.warpAffine(c, A, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT).astype(np.float32)
-    return f * VIG * (GRAD if poem else 1)
+    return f * VIG * (GRAD if (poem and i not in SIDE) else 1)
 
 def seg_frame(sg, T, layers):
     lt = T - sg["s"]; d = sg["d"]
     if sg["kind"] == "photo":
         c, focus, poem, i = sg["data"]
         if poem:
-            key = SEQ[i][0]; wl = POEMS[key]; ty = H * (0.80 if VERT else 0.82)
+            key = SEQ[i][0]; wl = POEMS[key]; ty = H * (0.80 if VERT else 0.82); tx = W / 2
+            if i in SIDE: tx, ty = W * 0.755, H * 0.5
             fo = np.clip((d + XF * 0.3 - lt) / 0.5, 0, 1)
             for k, (L, dx, dy) in enumerate(wl):
                 ta = np.clip((lt - 0.45 - k * 0.14) / 0.5, 0, 1)
-                layers.append(("p", L, W / 2 + dx, ty + dy + (1 - ease(ta)) * 26 * S, ease(ta) * ease(fo), None, 1.0))
+                layers.append(("p", L, tx + dx, ty + dy + (1 - ease(ta)) * 26 * S, ease(ta) * ease(fo), None, 1.0))
         return render_photo(sg["data"], lt, d)
     if sg["kind"] == "intro":
         return opening(lt, layers)
@@ -413,7 +419,7 @@ def word_mask(word):
     return m, (float(px), float(py)), float(dist[py, px]), (bb[2] - bb[0], bb[3] - bb[1]), cy
 LOVE_M, LOVE_PT, LOVE_D, LOVE_SZ, LOVE_CY = word_mask("LOVE")
 LOVE_X0 = W / 2 - LOVE_SZ[0] / 2
-OPEN_C = build_canvas(load(files["WA0054"]))
+OPEN_C = build_canvas(load(files["WA0054"]), cover=True)
 OPEN_DATA = (OPEN_C[0], OPEN_C[1], None, 0)
 tag = text_layer(["our love story"], SCRIPT, 92 if VERT else 80, color=(255, 236, 220))
 
@@ -431,7 +437,7 @@ date_script = text_layer(["27 November"], SCRIPT, 96 if VERT else 96, color=GOLD
 # 3) photo-grid collage
 GRID = ["WA0044", "WA0073", "WA0086", "WA0088", None, "WA0061", "WA0057", "WA0065", "WA0004"]
 GAP = int(6 * S); TW = (W - 4 * GAP) // 3; TH = (H - 4 * GAP) // 3
-GRID_T = {k: cv2.resize(build_canvas(load(files[k]))[0], (TW, TH), interpolation=cv2.INTER_AREA).astype(np.float32)
+GRID_T = {k: cv2.resize(build_canvas(load(files[k]), cover=True)[0], (TW, TH), interpolation=cv2.INTER_AREA).astype(np.float32)
           for k in GRID if k}
 
 def paste_rgb(frame, img, cx, cy, alpha):
