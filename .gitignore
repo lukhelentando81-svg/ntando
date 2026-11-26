@@ -1,0 +1,4 @@
+# Rendered videos contain private photos and a copyrighted song; keep them out of git
+prototype/
+*.mp4
+*.mp3
