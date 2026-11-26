@@ -137,16 +137,54 @@ TRANS = ["fade", "slide", "fade", "heart", "wipe", "flash", "circle", "slideup",
 def ease(t): return t * t * (3 - 2 * t)
 def ease2(t): t = min(max(t, 0), 1); return 0.5 - 0.5 * math.cos(math.pi * t)
 
+# ---------- lyric sync for "Perfect" (cue = moment the lyric is sung) ----------
+LYRIC = os.environ.get("LYRIC_SYNC") == "perfect"
+if LYRIC:
+    CUES = [("WA0038", 16.6),   # "I found a girl"
+            ("WA0035", 19.7),   # "beautiful and sweet"
+            ("WA0053", 24.8),   # "I never knew you were the someone"
+            ("WA0041", 28.2),   # "someone waiting for me"
+            ("WA0044", 31.5),   # "we were just kids"
+            ("WA0052", 34.0),   # "when we fell in love"
+            ("WA0065", 36.6),   # "not knowing what it was"
+            ("WA0073", 40.8),   # "I will not give you up"
+            ("WA0057", 44.3),   # "this time"
+            ("WA0045", 47.7),   # "darling just kiss me slow"
+            ("WA0002", 51.7),   # "your heart is all I own"
+            ("WA0061", 55.4),   # "and in your eyes"
+            ("WA0077", 58.6),   # "you're holding mine"
+            ("WA0086", 61.4),   # "Baby..."
+            ("WA0064", 66.3),   # "dancing in the dark"
+            ("WA0066", 70.0),   # "with you between my arms"
+            ("WA0056", 73.7),   # "barefoot on the grass"
+            ("WA0005", 77.6),   # "listening to our favourite song"
+            ("WA0084", 82.2),   # "you looked a mess"
+            ("WA0082", 85.5),   # "I whispered underneath my breath"
+            ("WA0089", 90.5),   # "darling, you look perfect tonight"
+            ("WA0088", 95.3),   # instrumental
+            ("WA0091", 100.2),  # "I found a woman"
+            ("WA0072", 104.7),  # "stronger than anyone I know"
+            ("WA0004", 108.1)]  # "she shares my dreams ... share her home"
+    OUTRO_CUE = 114.3           # outro title written on "I found a love"
+    POEM_OF = dict(SEQ)
+    SEQ = [(k, POEM_OF[k]) for k, _ in CUES]
+    STARTS = [c - XF / 2 for _, c in CUES] + [OUTRO_CUE - XF / 2]
+else:
+    STARTS = []; b = INTRO_BEATS
+    for i in range(len(SEQ) + 1):
+        STARTS.append(beat(b) - XF / 2)
+        if i < len(SEQ): b += beats_per[i]
+
 # ---------- build segments ----------
 segs = []  # dict(start, dur, kind, data, trans)
-b = INTRO_BEATS
-segs.append(dict(s=0.0, d=beat(b) - XF / 2, kind="intro", data=None, tr=None))
+segs.append(dict(s=0.0, d=STARTS[0], kind="intro", data=None, tr=None))
 for i, (k, poem) in enumerate(SEQ):
     print("prep", k, flush=True)
     c, focus = build_canvas(load(files[k]))
-    s0 = beat(b) - XF / 2; b += beats_per[i]; s1 = beat(b) - XF / 2
-    segs.append(dict(s=s0, d=s1 - s0, kind="photo", data=(c, focus, poem, i), tr=TRANS[i]))
-segs.append(dict(s=beat(b) - XF / 2, d=TOTAL - (beat(b) - XF / 2), kind="outro", data=None, tr=TRANS[len(SEQ)]))
+    segs.append(dict(s=STARTS[i], d=STARTS[i + 1] - STARTS[i], kind="photo", data=(c, focus, poem, i), tr=TRANS[i]))
+segs.append(dict(s=STARTS[-1], d=TOTAL - STARTS[-1], kind="outro", data=None, tr=TRANS[len(SEQ)]))
+OUT_T = (dict(a=(1.5, 1.6), b=(3.1, 1.0), c=3.7, d=4.3, f=1.4) if LYRIC else
+         dict(a=(0.6, 1.8), b=(2.2, 1.2), c=3.2, d=4.2, f=1.8))
 print("outro starts", segs[-1]["s"])
 
 # ---------- text ----------
@@ -339,13 +377,13 @@ def seg_frame(sg, T, layers):
         return f
     # outro
     f = BLUR * (1 - 0.85 * ease(np.clip((lt - (d - 1.6)) / 1.6, 0, 1)))
-    fo = 1 - ease(np.clip((lt - (d - 1.8)) / 1.5, 0, 1)); cy = H * 0.42; lh = 150 * S if VERT else 135 * S
-    layers.append(("p", o1a, W / 2, cy - lh / 2, fo, ease2(np.clip((lt - 0.6) / 1.8, 0, 1)), 1.0))
-    layers.append(("p", o1b, W / 2, cy + lh / 2, fo, ease2(np.clip((lt - 2.2) / 1.2, 0, 1)), 1.0))
+    fo = 1 - ease(np.clip((lt - (d - OUT_T["f"])) / (OUT_T["f"] - 0.2), 0, 1)); cy = H * 0.42; lh = 150 * S if VERT else 135 * S
+    layers.append(("p", o1a, W / 2, cy - lh / 2, fo, ease2(np.clip((lt - OUT_T["a"][0]) / OUT_T["a"][1], 0, 1)), 1.0))
+    layers.append(("p", o1b, W / 2, cy + lh / 2, fo, ease2(np.clip((lt - OUT_T["b"][0]) / OUT_T["b"][1], 0, 1)), 1.0))
     for k, (L, dx, dy) in enumerate(o2):
-        ta = np.clip((lt - 3.2 - k * 0.15) / 0.5, 0, 1)
+        ta = np.clip((lt - OUT_T["c"] - k * 0.13) / 0.5, 0, 1)
         layers.append(("p", L, W / 2 + dx, cy + lh + 95 * S + dy + (1 - ease(ta)) * 20 * S, ease(ta) * fo, None, 1.0))
-    da = ease(np.clip((lt - 4.2) / 0.8, 0, 1))
+    da = ease(np.clip((lt - OUT_T["d"]) / 0.6, 0, 1))
     layers.append(("p", date, W / 2, cy + lh + 180 * S, da * fo, None, 1.0))
     layers.append(("p", HEART_ICON, W / 2, cy - lh - 90 * S, da * fo, None, 1 + 0.18 * beat_pulse(T)))
     return f
@@ -356,6 +394,8 @@ HEART_ICON = make_heart(int(34 * S), (255, 130, 160))
 ANTON = f"{FONTS}/anton/package/files/anton-latin-400-normal.woff"
 GOLD = (236, 196, 120)
 def tb(k): return beat(k)
+OT = (dict(w0=1.9, w1=3.8, tag=4.3, z0=5.7, z1=6.9, leak=11.3, g0=11.5, gstep=0.4, gc=14.7, gz0=15.3) if LYRIC else
+      dict(w0=tb(0), w1=tb(1.6), tag=tb(1.6), z0=tb(4), z1=tb(5.6), leak=tb(9), g0=tb(9.3), gstep=0.42 * BPM_P, gc=tb(12.4), gz0=tb(13)))
 
 # 1) photo-filled word "LOVE" on black
 def word_mask(word):
@@ -408,7 +448,7 @@ POP_ORDER = [0, 2, 8, 6, 1, 5, 7, 3]  # corners, then edges; centre last
 def grid_frame(T):
     G = np.zeros((H, W, 3), np.float32)
     for j, i in enumerate(POP_ORDER + [4]):
-        t0 = tb(9.3 + j * 0.42) if i != 4 else tb(12.4)
+        t0 = OT["g0"] + j * OT["gstep"] if i != 4 else OT["gc"]
         a = np.clip((T - t0) / 0.32, 0, 1)
         if a <= 0: continue
         e = ease2(a); sc = 0.72 + 0.28 * e
@@ -419,14 +459,14 @@ def grid_frame(T):
         if sc < 0.999: img = cv2.resize(img, (max(1, int(TW * sc)), max(1, int(TH * sc))), interpolation=cv2.INTER_LINEAR)
         cx, cy = tile_center(i); paste_rgb(G, img, cx, cy, e)
     # zoom into the centre tile so it becomes the first story photo
-    zt = ease2(np.clip((T - tb(13)) / (tb(14) - XF / 2 - tb(13)), 0, 1))
+    zt = ease2(np.clip((T - OT["gz0"]) / (segs[1]["s"] - OT["gz0"]), 0, 1))
     if zt > 0:
         zmax = max(W / TW, H / TH) * 1.002; z = 1 + (zmax - 1) * zt
         G = scale_img(G, z)
     return G
 
 def opening(T, layers):
-    t_wipe0, t_wipe1, t_zoom0, t_zoom1, t_leak = tb(0), tb(1.6), tb(4), tb(5.6), tb(9)
+    t_wipe0, t_wipe1, t_zoom0, t_zoom1, t_leak = OT["w0"], OT["w1"], OT["z0"], OT["z1"], OT["leak"]
     photo = render_photo(OPEN_DATA, T + 1.0, 14.0)
     if T < t_zoom1:  # photo seen through the letters
         m = LOVE_M
@@ -440,7 +480,7 @@ def opening(T, layers):
             px, py = LOVE_PT
             m = cv2.warpAffine(m, np.float32([[s, 0, px - s * px], [0, s, py - s * py]]), (W, H), flags=cv2.INTER_LINEAR)
         out = photo * m[..., None]
-        ta = ease(np.clip((T - tb(1.6)) / 0.7, 0, 1)) * (1 - ease(np.clip((T - t_zoom0) / 0.4, 0, 1)))
+        ta = ease(np.clip((T - OT["tag"]) / 0.7, 0, 1)) * (1 - ease(np.clip((T - t_zoom0) / 0.4, 0, 1)))
         layers.append(("p", tag, W / 2, LOVE_CY + LOVE_SZ[1] / 2 + 70 * S, ta, None, 1.0))
         return out
     # title over the full photo
@@ -488,7 +528,7 @@ def frame_at(T):
 cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-"]
 if AUDIO:
     cmd += ["-ss", str(ASTART), "-i", AUDIO, "-map", "0:v", "-map", "1:a",
-            "-af", f"afade=t=in:d=1.5,afade=t=out:st={TOTAL-4}:d=4", "-c:a", "aac", "-b:a", "256k", "-shortest"]
+            "-af", f"afade=t=in:d=1.5,afade=t=out:st={TOTAL-3}:d=3", "-c:a", "aac", "-b:a", "256k", "-shortest"]
 cmd += ["-c:v", "libx264", "-preset", "medium", "-crf", "17", "-pix_fmt", "yuv420p", "-profile:v", "high",
         "-movflags", "+faststart", "-t", str(TOTAL), OUT]
 if os.environ.get("STILLS"):
